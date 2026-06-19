@@ -9,8 +9,6 @@ public class Main {
 
     private static final Set<String> BUILTINS =
             Set.of("echo", "exit", "type", "pwd", "cd", "jobs");
-    
-    private static int nextJobNumber = 1;
 
     private static class Job {
         int jobNumber;
@@ -31,7 +29,6 @@ public class Main {
     private static final List<Job> activeJobs = new ArrayList<>();
 
     // --- REAPING & PRINTING LOGIC ---
-    // Updates job statuses and prints them in the correct sequential job order.
     private static void reapAndPrintJobs(boolean isJobsBuiltin) {
         // Step 1: Check and update statuses first without printing or removing yet
         for (Job job : activeJobs) {
@@ -75,7 +72,7 @@ public class Main {
         Path currentDirectory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
 
         while (true) {
-            // --- POINT 1: AUTOMATIC REAPING BEFORE PROMPT (Only print Done jobs) ---
+            // --- POINT 1: AUTOMATIC REAPING BEFORE PROMPT ---
             reapAndPrintJobs(false);
 
             System.out.print("$ ");
@@ -165,7 +162,7 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
-                // --- POINT 2: JOBS BUILTIN IMPLEMENTATION (Print both Done and Running jobs) ---
+                // --- POINT 2: JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
                     reapAndPrintJobs(true);
                 }
@@ -221,6 +218,7 @@ public class Main {
                         }
                     }
                 }
+                // External Commands Block
                 else {
                     Path executable = findExecutable(command);
 
@@ -260,11 +258,22 @@ public class Main {
                     Process process = pb.start();
 
                     if (isBackground) {
-                        System.out.println("[" + nextJobNumber + "] " + process.pid());
+                        // --- DYNAMIC RECYCLING OF JOB NUMBERS ---
+                        int assignedJobNumber = 1;
+                        if (!activeJobs.isEmpty()) {
+                            int maxJobNumber = 0;
+                            for (Job job : activeJobs) {
+                                if (job.jobNumber > maxJobNumber) {
+                                    maxJobNumber = job.jobNumber;
+                                }
+                            }
+                            assignedJobNumber = maxJobNumber + 1;
+                        }
+
+                        System.out.println("[" + assignedJobNumber + "] " + process.pid());
                         System.out.flush();
                         
-                        activeJobs.add(new Job(nextJobNumber, process.pid(), baseCommandString, process));
-                        nextJobNumber++;
+                        activeJobs.add(new Job(assignedJobNumber, process.pid(), baseCommandString, process));
                     } else {
                         process.waitFor();
                     }
