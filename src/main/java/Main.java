@@ -6,7 +6,7 @@ import java.nio.file.Path;
 public class Main {
 
     private static final Set<String> BUILTINS =
-            Set.of("echo", "exit", "type");
+            Set.of("echo", "exit", "type", "pwd");
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
@@ -14,11 +14,21 @@ public class Main {
         while (true) {
             System.out.print("$ ");
 
-            String input = scanner.nextLine();
+            String input = scanner.nextLine().trim();
+
+            // Ignore empty inputs
+            if (input.isEmpty()) {
+                continue;
+            }
 
             // exit builtin
             if (input.equals("exit")) {
                 break;
+            }
+
+            // pwd builtin
+            else if (input.equals("pwd")) {
+                System.out.println(System.getProperty("user.dir"));
             }
 
             // echo builtin
