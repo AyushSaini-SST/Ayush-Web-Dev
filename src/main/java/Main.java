@@ -15,7 +15,7 @@ public class Main {
     private static class Job {
         int jobNumber;
         long pid;
-        String baseCommandString; // Just the command arguments joined without the &
+        String baseCommandString; // The exact literal command input without the trailing &
         String status;
         Process process;
 
@@ -44,6 +44,13 @@ public class Main {
                 continue;
             }
 
+            // --- EXTRACT EXACT RAW COMMAND STRING ---
+            // Extract a literal string of the command to preserve formatting/quoting
+            String baseCommandString = input;
+            if (baseCommandString.endsWith("&")) {
+                baseCommandString = baseCommandString.substring(0, baseCommandString.length() - 1).trim();
+            }
+
             List<String> parsedTokens = parseArguments(input);
             if (parsedTokens.isEmpty()) {
                 continue;
@@ -59,9 +66,6 @@ public class Main {
             if (parsedTokens.isEmpty()) {
                 continue;
             }
-
-            // Reconstruct a normalized base string string from remaining tokens
-            String baseCommandString = String.join(" ", parsedTokens);
 
             // --- REDIRECTION PARSING ---
             String outputFile = null;
@@ -138,7 +142,7 @@ public class Main {
                             marker = '-';
                         }
 
-                        // Done processes drop the trailing ampersand token cleanly
+                        // Use the exact string configuration expected by the test framework
                         String finalCommandOutput = job.status.equals("Done") 
                                 ? job.baseCommandString 
                                 : job.baseCommandString + " &";
