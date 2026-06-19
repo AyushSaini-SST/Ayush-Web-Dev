@@ -56,7 +56,7 @@ public class Main {
                 }
 
                 List<String> processArgs = new ArrayList<>();
-                processArgs.add(executable.toString());
+                processArgs.add(command);
 
                 // Add only the actual arguments, not the command again
                 for (int i = 1; i < parts.length; i++) {
