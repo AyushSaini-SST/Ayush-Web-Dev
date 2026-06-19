@@ -109,11 +109,15 @@ public class Main {
                     continue;
                 }
 
-                // Replace the unquoted raw string at index 0 with the full path to the executable
-                parsedTokens.set(0, executable.toString());
+                // Pass parsedTokens unmodified (keeps command name as arg 0)
+                // but use explicit executable path reference to launch it via ProcessBuilder command array override
+                List<String> commandLine = new ArrayList<>();
+                commandLine.add(executable.toString());
+                for (int i = 1; i < parsedTokens.size(); i++) {
+                    commandLine.add(parsedTokens.get(i));
+                }
 
-                // Pass the correctly parsed arguments directly to ProcessBuilder
-                Process process = new ProcessBuilder(parsedTokens)
+                Process process = new ProcessBuilder(commandLine)
                         .directory(currentDirectory.toFile())
                         .inheritIO()
                         .start();
