@@ -39,12 +39,13 @@ public class Main {
 
             for (int i = 0; i < parsedTokens.size(); i++) {
                 String token = parsedTokens.get(i);
-                if (token.equals(">") || token.equals("1>") || token.equals("2>") || token.equals(">>") || token.equals("1>>")) {
+                if (token.equals(">") || token.equals("1>") || token.equals("2>") || 
+                    token.equals(">>") || token.equals("1>>") || token.equals("2>>")) {
                     if (i + 1 < parsedTokens.size()) {
                         outputFile = parsedTokens.get(i + 1);
                         redirectIndex = i;
-                        isStderrRedirect = token.equals("2>");
-                        isAppend = token.equals(">>") || token.equals("1>>");
+                        isStderrRedirect = token.equals("2>") || token.equals("2>>");
+                        isAppend = token.equals(">>") || token.equals("1>>") || token.equals("2>>");
                         break;
                     }
                 }
@@ -73,7 +74,6 @@ public class Main {
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-                // Open file in append mode if requested
                 fileOutOrErr = new PrintStream(new FileOutputStream(file, isAppend));
                 
                 if (isStderrRedirect) {
