@@ -35,14 +35,16 @@ public class Main {
             String outputFile = null;
             int redirectIndex = -1;
             boolean isStderrRedirect = false;
+            boolean isAppend = false;
 
             for (int i = 0; i < parsedTokens.size(); i++) {
                 String token = parsedTokens.get(i);
-                if (token.equals(">") || token.equals("1>") || token.equals("2>")) {
+                if (token.equals(">") || token.equals("1>") || token.equals("2>") || token.equals(">>") || token.equals("1>>")) {
                     if (i + 1 < parsedTokens.size()) {
                         outputFile = parsedTokens.get(i + 1);
                         redirectIndex = i;
                         isStderrRedirect = token.equals("2>");
+                        isAppend = token.equals(">>") || token.equals("1>>");
                         break;
                     }
                 }
@@ -71,7 +73,8 @@ public class Main {
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-                fileOutOrErr = new PrintStream(new FileOutputStream(file));
+                // Open file in append mode if requested
+                fileOutOrErr = new PrintStream(new FileOutputStream(file, isAppend));
                 
                 if (isStderrRedirect) {
                     System.setErr(fileOutOrErr);
@@ -174,11 +177,11 @@ public class Main {
                         }
                         
                         if (isStderrRedirect) {
-                            pb.redirectError(file);
-                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT); // Keep stdout on terminal
+                            pb.redirectError(isAppend ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
+                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT); 
                         } else {
-                            pb.redirectOutput(file);
-                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);  // Keep stderr on terminal
+                            pb.redirectOutput(isAppend ? ProcessBuilder.Redirect.appendTo(file) : ProcessBuilder.Redirect.to(file));
+                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);  
                         }
                     } else {
                         pb.inheritIO();
