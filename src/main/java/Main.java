@@ -6,17 +6,19 @@ import java.nio.file.Path;
 public class Main {
 
     private static final Set<String> BUILTINS =
-            Set.of("echo", "exit", "type", "pwd");
+            Set.of("echo", "exit", "type", "pwd", "cd");
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
+        
+        // Track the current working directory dynamically
+        Path currentDirectory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
 
         while (true) {
             System.out.print("$ ");
 
             String input = scanner.nextLine().trim();
 
-            // Ignore empty inputs
             if (input.isEmpty()) {
                 continue;
             }
@@ -28,7 +30,24 @@ public class Main {
 
             // pwd builtin
             else if (input.equals("pwd")) {
-                System.out.println(System.getProperty("user.dir"));
+                System.out.println(currentDirectory);
+            }
+
+            // cd builtin
+            else if (input.startsWith("cd ")) {
+                String pathStr = input.substring(3).trim();
+                Path targetPath = Path.of(pathStr);
+
+                // For this stage, handling absolute paths
+                if (!targetPath.isAbsolute()) {
+                    targetPath = currentDirectory.resolve(targetPath).normalize();
+                }
+
+                if (Files.exists(targetPath) && Files.isDirectory(targetPath)) {
+                    currentDirectory = targetPath.toAbsolutePath();
+                } else {
+                    System.out.println("cd: " + pathStr + ": No such file or directory");
+                }
             }
 
             // echo builtin
@@ -68,12 +87,13 @@ public class Main {
                 List<String> processArgs = new ArrayList<>();
                 processArgs.add(command);
 
-                // Add only the actual arguments, not the command again
                 for (int i = 1; i < parts.length; i++) {
                     processArgs.add(parts[i]);
                 }
 
+                // Pass the current tracked directory to the process environment
                 Process process = new ProcessBuilder(processArgs)
+                        .directory(currentDirectory.toFile())
                         .inheritIO()
                         .start();
 
