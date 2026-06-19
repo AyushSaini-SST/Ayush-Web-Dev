@@ -116,7 +116,7 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
-                // --- JOBS BUILTIN IMPLEMENTATION WITH REAPING ---
+                // --- FIXED JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
                     int totalJobs = activeJobs.size();
                     List<Job> jobsToRemove = new ArrayList<>();
@@ -124,12 +124,14 @@ public class Main {
                     for (int i = 0; i < totalJobs; i++) {
                         Job job = activeJobs.get(i);
                         
-                        // Check if the underlying OS background process has finished
-                        if (!job.process.isAlive()) {
+                        // Sync dead processes up to "Done" status
+                        if (!job.process.isAlive() && !job.status.equals("Done")) {
                             job.status = "Done";
-                            // For "Done" entries, remove any trailing amp "&" if it exists
-                            if (job.commandString.endsWith(" &")) {
-                                job.commandString = job.commandString.substring(0, job.commandString.length() - 2);
+                            
+                            // Strip ampersand cleanly, ignoring variable spaces
+                            if (job.commandString.endsWith("&")) {
+                                String stripped = job.commandString.substring(0, job.commandString.length() - 1).trim();
+                                job.commandString = stripped;
                             }
                             jobsToRemove.add(job);
                         }
@@ -145,7 +147,7 @@ public class Main {
                         System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + job.commandString);
                     }
                     
-                    // Clean up reaped jobs from our active list so they don't print next time
+                    // Post-processing eviction avoids indexing corruption
                     activeJobs.removeAll(jobsToRemove);
                     System.out.flush();
                 }
@@ -161,7 +163,7 @@ public class Main {
                         targetPath = Path.of(homeEnv != null ? homeEnv : System.getProperty("user.home"));
                     } else if (pathStr.startsWith("~/")) {
                         String homeEnv = System.getenv("HOME");
-                        String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home"));
+                        String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home");
                         targetPath = Path.of(homeDir, pathStr.substring(2));
                     } else {
                         targetPath = Path.of(pathStr);
@@ -244,7 +246,6 @@ public class Main {
                         System.out.println("[" + nextJobNumber + "] " + process.pid());
                         System.out.flush();
                         
-                        // Pass the Process handle into the tracking instance
                         activeJobs.add(new Job(nextJobNumber, process.pid(), rawCommandString, process));
                         nextJobNumber++;
                     } else {
