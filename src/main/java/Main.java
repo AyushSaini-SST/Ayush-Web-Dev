@@ -1,5 +1,7 @@
 import java.util.*;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -29,145 +31,168 @@ public class Main {
                 continue;
             }
 
-            // The first token is ALWAYS the command name, with outer quotes already stripped out!
-            String command = parsedTokens.get(0);
+            // --- REDIRECTION PARSING ---
+            String outputFile = null;
+            int redirectIndex = -1;
 
-            // exit builtin
-            if (command.equals("exit")) {
-                break;
-            }
-
-            // pwd builtin
-            else if (command.equals("pwd")) {
-                System.out.println(currentDirectory);
-            }
-
-            // cd builtin
-            else if (command.equals("cd")) {
-                String pathStr = parsedTokens.size() > 1 ? parsedTokens.get(1) : "~";
-                Path targetPath;
-
-                // Handle the ~ (home directory) symbol
-                if (pathStr.equals("~")) {
-                    String homeEnv = System.getenv("HOME");
-                    targetPath = Path.of(homeEnv != null ? homeEnv : System.getProperty("user.home"));
-                } else if (pathStr.startsWith("~/")) {
-                    String homeEnv = System.getenv("HOME");
-                    String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home");
-                    targetPath = Path.of(homeDir, pathStr.substring(2));
-                } else {
-                    targetPath = Path.of(pathStr);
-                }
-
-                // If path is not absolute, resolve it relative to currentDirectory
-                if (!targetPath.isAbsolute()) {
-                    targetPath = currentDirectory.resolve(targetPath).normalize();
-                } else {
-                    targetPath = targetPath.normalize();
-                }
-
-                // Verify the directory exists and is a valid directory
-                if (Files.exists(targetPath) && Files.isDirectory(targetPath)) {
-                    currentDirectory = targetPath.toAbsolutePath();
-                } else {
-                    System.out.println("cd: " + pathStr + ": No such file or directory");
+            for (int i = 0; i < parsedTokens.size(); i++) {
+                String token = parsedTokens.get(i);
+                if (token.equals(">") || token.equals("1>")) {
+                    if (i + 1 < parsedTokens.size()) {
+                        outputFile = parsedTokens.get(i + 1);
+                        redirectIndex = i;
+                        break;
+                    }
                 }
             }
 
-            // echo builtin
-            else if (command.equals("echo")) {
-                List<String> echoArgs = parsedTokens.subList(1, parsedTokens.size());
-                System.out.println(String.join(" ", echoArgs));
+            List<String> commandTokens = parsedTokens;
+            if (redirectIndex != -1) {
+                // Separate the command and its arguments from the redirection instructions
+                commandTokens = new ArrayList<>(parsedTokens.subList(0, redirectIndex));
             }
 
-            // type builtin
-            else if (command.equals("type")) {
-                if (parsedTokens.size() < 2) {
-                    continue;
+            if (commandTokens.isEmpty()) {
+                continue;
+            }
+
+            String command = commandTokens.get(0);
+
+            // Handle redirection stream capturing for Builtins
+            PrintStream originalOut = System.out;
+            PrintStream fileOut = null;
+            if (outputFile != null && BUILTINS.contains(command)) {
+                File file = new File(outputFile);
+                File parent = file.getParentFile();
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs();
                 }
-                String targetCommand = parsedTokens.get(1);
+                fileOut = new PrintStream(new FileOutputStream(file));
+                System.setOut(fileOut);
+            }
 
-                if (BUILTINS.contains(targetCommand)) {
-                    System.out.println(targetCommand + " is a shell builtin");
-                } else {
-                    Path executable = findExecutable(targetCommand);
+            try {
+                // exit builtin
+                if (command.equals("exit")) {
+                    break;
+                }
 
-                    if (executable != null) {
-                        System.out.println(targetCommand + " is " + executable);
+                // pwd builtin
+                else if (command.equals("pwd")) {
+                    System.out.println(currentDirectory);
+                }
+
+                // cd builtin
+                else if (command.equals("cd")) {
+                    String pathStr = commandTokens.size() > 1 ? commandTokens.get(1) : "~";
+                    Path targetPath;
+
+                    if (pathStr.equals("~")) {
+                        String homeEnv = System.getenv("HOME");
+                        targetPath = Path.of(homeEnv != null ? homeEnv : System.getProperty("user.home"));
+                    } else if (pathStr.startsWith("~/")) {
+                        String homeEnv = System.getenv("HOME");
+                        String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home");
+                        targetPath = Path.of(homeDir, pathStr.substring(2));
                     } else {
-                        System.out.println(targetCommand + ": not found");
+                        targetPath = Path.of(pathStr);
+                    }
+
+                    if (!targetPath.isAbsolute()) {
+                        targetPath = currentDirectory.resolve(targetPath).normalize();
+                    } else {
+                        targetPath = targetPath.normalize();
+                    }
+
+                    if (Files.exists(targetPath) && Files.isDirectory(targetPath)) {
+                        currentDirectory = targetPath.toAbsolutePath();
+                    } else {
+                        System.err.println("cd: " + pathStr + ": No such file or directory");
                     }
                 }
-            }
 
-            // external commands
-            else {
-                Path executable = findExecutable(command);
-
-                if (executable == null) {
-                    System.out.println(command + ": command not found");
-                    continue;
+                // echo builtin
+                else if (command.equals("echo")) {
+                    List<String> echoArgs = commandTokens.subList(1, commandTokens.size());
+                    System.out.println(String.join(" ", echoArgs));
                 }
 
-                // FIX: On Unix systems, we can modify the first argument to be the full path 
-                // so ProcessBuilder can find it, but if it's a relative/PATH executable,
-                // we want to ensure the ProcessBuilder execution command array preserves the exact 
-                // arg0 string expectations if the platform requires it.
-                // However, since ProcessBuilder sets argv[0] to commandLine.get(0), we can check if 
-                // executing it requires passing the full path or keeping the token.
-                // To safely satisfy CodeCrafters' expectations for both 'quoted executables' and 'argv[0]',
-                // we pass the absolute path as the command to run, but if the tester expects the raw name,
-                // standard shell behavior runs the binary with the absolute path.
-                List<String> commandLine = new ArrayList<>(parsedTokens);
-                commandLine.set(0, executable.toAbsolutePath().toString());
+                // type builtin
+                else if (command.equals("type")) {
+                    if (commandTokens.size() < 2) {
+                        continue;
+                    }
+                    String targetCommand = commandTokens.get(1);
 
-                // If the tester explicitly expects the original command string in argv[0] (Stage #IP1), 
-                // but we are executing an executable with spaces found via PATH (Stage #QJ0), we can use a shell wrapper
-                // or match the exact executable string structure.
-                // Let's create a ProcessBuilder directly with the absolute executable path at index 0.
-                // To pass Stage #IP1 where it verifies argv[0] to match the exact program name string,
-                // we can look at whether the original command was an absolute/relative path or a simple name.
-                if (!command.contains(File.separator)) {
-                    // For simple names found in PATH, the tester expects argv[0] to match 'command'.
-                    // We can invoke it by using a tiny workaround: use the absolute path for execution,
-                    // but if it fails because of argv[0], we check if the path contains spaces.
-                    // Let's use the absolute path but fallback dynamically if needed.
-                    // Actually, if we pass the absolute path, Stage #IP1 failed because it received the full path.
-                    // If we pass the original 'command', Stage #QJ0 fails because it cannot find executables with spaces.
-                    // To satisfy both: if the command contains a slash or spaces, we must pass the absolute path. 
-                    // If it's a simple program name from PATH without spaces, we can pass the simple command name!
-                    if (command.equals(executable.getFileName().toString())) {
+                    if (BUILTINS.contains(targetCommand)) {
+                        System.out.println(targetCommand + " is a shell builtin");
+                    } else {
+                        Path executable = findExecutable(targetCommand);
+
+                        if (executable != null) {
+                            System.out.println(targetCommand + " is " + executable);
+                        } else {
+                            System.out.println(targetCommand + ": not found");
+                        }
+                    }
+                }
+
+                // external commands
+                else {
+                    Path executable = findExecutable(command);
+
+                    if (executable == null) {
+                        System.out.println(command + ": command not found");
+                        continue;
+                    }
+
+                    List<String> commandLine = new ArrayList<>(commandTokens);
+                    if (!command.contains(File.separator) && command.equals(executable.getFileName().toString())) {
                         commandLine.set(0, command);
+                    } else {
+                        commandLine.set(0, executable.toAbsolutePath().toString());
                     }
+
+                    ProcessBuilder pb = new ProcessBuilder(commandLine)
+                            .directory(currentDirectory.toFile())
+                            .inheritIO();
+
+                    // If redirection target exists for an external command, route it via ProcessBuilder
+                    if (outputFile != null) {
+                        File file = new File(outputFile);
+                        File parent = file.getParentFile();
+                        if (parent != null && !parent.exists()) {
+                            parent.mkdirs();
+                        }
+                        pb.redirectOutput(file);
+                        pb.redirectError(ProcessBuilder.Redirect.INHERIT); // Keep stderr on terminal
+                    }
+
+                    Process process = pb.start();
+                    process.waitFor();
                 }
-
-                Process process = new ProcessBuilder(commandLine)
-                        .directory(currentDirectory.toFile())
-                        .inheritIO()
-                        .start();
-
-                process.waitFor();
+            } finally {
+                // Revert system output stream safely if it was hijacked for builtins
+                if (fileOut != null) {
+                    fileOut.close();
+                    System.setOut(originalOut);
+                }
             }
         }
 
         scanner.close();
     }
 
-    /**
-     * Parses a raw shell input line into discrete arguments.
-     * Preserves inner quoted spaces and handles backslash escaping inside/outside quotes.
-     */
     private static List<String> parseArguments(String input) {
         List<String> args = new ArrayList<>();
         StringBuilder currentArg = new StringBuilder();
         boolean inSingleQuotes = false;
         boolean inDoubleQuotes = false;
-        boolean explicitArgument = false; // Flags empty quoted tokens
+        boolean explicitArgument = false;
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            // 1. Handle backslash escaping OUTSIDE quotes
             if (c == '\\' && !inSingleQuotes && !inDoubleQuotes) {
                 if (i + 1 < input.length()) {
                     i++; 
@@ -177,7 +202,6 @@ public class Main {
                 continue;
             }
 
-            // 2. Handle backslash escaping INSIDE double quotes
             if (c == '\\' && inDoubleQuotes) {
                 if (i + 1 < input.length()) {
                     char nextChar = input.charAt(i + 1);
@@ -219,7 +243,6 @@ public class Main {
     }
 
     private static Path findExecutable(String command) {
-        // If the command is already an absolute or relative file path, check it directly
         Path directPath = Path.of(command);
         if (directPath.isAbsolute() || command.contains(File.separator)) {
             if (Files.exists(directPath) && Files.isExecutable(directPath)) {
