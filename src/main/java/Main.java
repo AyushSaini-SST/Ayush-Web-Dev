@@ -12,19 +12,40 @@ public class Main {
     
     private static int nextJobNumber = 1;
 
+    // Model class to represent active background tasks
+    private static class Job {
+        int jobNumber;
+        long pid;
+        String commandString;
+        String status;
+
+        Job(int jobNumber, long pid, String commandString) {
+            this.jobNumber = jobNumber;
+            this.pid = pid;
+            this.commandString = commandString;
+            this.status = "Running";
+        }
+    }
+
+    // List to preserve the registry of active tracking jobs
+    private static final List<Job> activeJobs = new ArrayList<>();
+
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
         Path currentDirectory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
 
         while (true) {
             System.out.print("$ ");
-            System.out.flush(); // Ensure the prompt is visible immediately
+            System.out.flush();
 
             String input = scanner.nextLine().trim();
 
             if (input.isEmpty()) {
                 continue;
             }
+
+            // Keep track of the original raw text command for jobs listing mapping
+            String rawCommandString = input;
 
             List<String> parsedTokens = parseArguments(input);
             if (parsedTokens.isEmpty()) {
@@ -96,8 +117,14 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
+                // --- JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
-                    // Empty implementation for this stage
+                    for (Job job : activeJobs) {
+                        // %-24s pads "Running" with spaces to the right to hit exactly 24 characters total width
+                        String formattedStatus = String.format("%-24s", job.status);
+                        System.out.println("[" + job.jobNumber + "]+  " + formattedStatus + job.commandString);
+                    }
+                    System.out.flush();
                 }
                 else if (command.equals("pwd")) {
                     System.out.println(currentDirectory);
@@ -151,7 +178,7 @@ public class Main {
                         }
                     }
                 }
-                // External Commands Execution Block
+                // External Commands Block
                 else {
                     Path executable = findExecutable(command);
 
@@ -185,7 +212,6 @@ public class Main {
                             pb.redirectError(ProcessBuilder.Redirect.INHERIT);  
                         }
                     } else {
-                        // Inherit shell streams directly
                         pb.inheritIO();
                     }
 
@@ -193,7 +219,10 @@ public class Main {
 
                     if (isBackground) {
                         System.out.println("[" + nextJobNumber + "] " + process.pid());
-                        System.out.flush(); // CRITICAL: Flush background job metadata instantly
+                        System.out.flush();
+                        
+                        // Register job before incrementing global index counter
+                        activeJobs.add(new Job(nextJobNumber, process.pid(), rawCommandString));
                         nextJobNumber++;
                     } else {
                         process.waitFor();
