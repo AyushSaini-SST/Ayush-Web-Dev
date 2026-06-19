@@ -1,6 +1,7 @@
 import java.util.*;
-import java.io.*;
-import java.nio.file.*;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public class Main {
 
@@ -15,14 +16,17 @@ public class Main {
 
             String input = scanner.nextLine();
 
+            // exit builtin
             if (input.equals("exit")) {
                 break;
             }
 
+            // echo builtin
             else if (input.startsWith("echo ")) {
                 System.out.println(input.substring(5));
             }
 
+            // type builtin
             else if (input.startsWith("type ")) {
                 String command = input.substring(5);
 
@@ -39,6 +43,7 @@ public class Main {
                 }
             }
 
+            // external commands
             else {
                 String[] parts = input.split(" ");
                 String command = parts[0];
@@ -53,8 +58,9 @@ public class Main {
                 List<String> processArgs = new ArrayList<>();
                 processArgs.add(executable.toString());
 
-                for (String part : parts) {
-                    processArgs.add(part);
+                // Add only the actual arguments, not the command again
+                for (int i = 1; i < parts.length; i++) {
+                    processArgs.add(parts[i]);
                 }
 
                 Process process = new ProcessBuilder(processArgs)
