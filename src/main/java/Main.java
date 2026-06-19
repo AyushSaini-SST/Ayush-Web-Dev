@@ -1,33 +1,34 @@
-import java.util.Scanner;
+Set<String> builtins = Set.of("echo", "exit", "type");
 
-public class Main {
-    public static void main(String[] args) {
-        Scanner scanner = new Scanner(System.in);
+...
 
-        while (true) {
-            System.out.print("$ ");
-            String input = scanner.nextLine();
+else if (input.startsWith("type ")) {
+    String command = input.substring(5);
 
-            if (input.equals("exit")) {
+    if (builtins.contains(command)) {
+        System.out.println(command + " is a shell builtin");
+    } else {
+        String pathEnv = System.getenv("PATH");
+        String[] directories = pathEnv.split(File.pathSeparator);
+
+        boolean found = false;
+
+        for (String dir : directories) {
+            Path executablePath = Path.of(dir, command);
+
+            if (Files.exists(executablePath)
+                    && Files.isExecutable(executablePath)) {
+
+                System.out.println(command + " is " +
+                        executablePath.toAbsolutePath());
+
+                found = true;
                 break;
-            } 
-            else if (input.startsWith("echo ")) {
-                System.out.println(input.substring(5));
-            } 
-            else if (input.startsWith("type ")) {
-                String command = input.substring(5);
-
-                if (command.equals("echo") ||
-                    command.equals("exit") ||
-                    command.equals("type")) {
-                    System.out.println(command + " is a shell builtin");
-                } else {
-                    System.out.println(command + ": not found");
-                }
-            } 
-            else {
-                System.out.println(input + ": command not found");
             }
+        }
+
+        if (!found) {
+            System.out.println(command + ": not found");
         }
     }
 }
