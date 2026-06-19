@@ -23,19 +23,27 @@ public class Main {
                 continue;
             }
 
+            // Parse the command line into arguments respecting single quotes
+            List<String> parsedTokens = parseArguments(input);
+            if (parsedTokens.isEmpty()) {
+                continue;
+            }
+
+            String command = parsedTokens.get(0);
+
             // exit builtin
-            if (input.equals("exit")) {
+            if (command.equals("exit")) {
                 break;
             }
 
             // pwd builtin
-            else if (input.equals("pwd")) {
+            else if (command.equals("pwd")) {
                 System.out.println(currentDirectory);
             }
 
             // cd builtin
-            else if (input.startsWith("cd ")) {
-                String pathStr = input.substring(3).trim();
+            else if (command.equals("cd")) {
+                String pathStr = parsedTokens.size() > 1 ? parsedTokens.get(1) : "~";
                 Path targetPath;
 
                 // Handle the ~ (home directory) symbol
@@ -66,32 +74,34 @@ public class Main {
             }
 
             // echo builtin
-            else if (input.startsWith("echo ")) {
-                System.out.println(input.substring(5));
+            else if (command.equals("echo")) {
+                // Joint elements starting from index 1 with a single space
+                List<String> echoArgs = parsedTokens.subList(1, parsedTokens.size());
+                System.out.println(String.join(" ", echoArgs));
             }
 
             // type builtin
-            else if (input.startsWith("type ")) {
-                String command = input.substring(5);
+            else if (command.equals("type")) {
+                if (parsedTokens.size() < 2) {
+                    continue;
+                }
+                String targetCommand = parsedTokens.get(1);
 
-                if (BUILTINS.contains(command)) {
-                    System.out.println(command + " is a shell builtin");
+                if (BUILTINS.contains(targetCommand)) {
+                    System.out.println(targetCommand + " is a shell builtin");
                 } else {
-                    Path executable = findExecutable(command);
+                    Path executable = findExecutable(targetCommand);
 
                     if (executable != null) {
-                        System.out.println(command + " is " + executable);
+                        System.out.println(targetCommand + " is " + executable);
                     } else {
-                        System.out.println(command + ": not found");
+                        System.out.println(targetCommand + ": not found");
                     }
                 }
             }
 
             // external commands
             else {
-                String[] parts = input.split(" ");
-                String command = parts[0];
-
                 Path executable = findExecutable(command);
 
                 if (executable == null) {
@@ -99,15 +109,8 @@ public class Main {
                     continue;
                 }
 
-                List<String> processArgs = new ArrayList<>();
-                processArgs.add(command);
-
-                for (int i = 1; i < parts.length; i++) {
-                    processArgs.add(parts[i]);
-                }
-
-                // Pass the current tracked directory to the process environment
-                Process process = new ProcessBuilder(processArgs)
+                // Pass the correctly parsed arguments directly to ProcessBuilder
+                Process process = new ProcessBuilder(parsedTokens)
                         .directory(currentDirectory.toFile())
                         .inheritIO()
                         .start();
@@ -117,6 +120,42 @@ public class Main {
         }
 
         scanner.close();
+    }
+
+    /**
+     * Parses a raw shell input line into discrete arguments.
+     * Preserves inner single-quoted spaces and handles literal sequences cleanly.
+     */
+    private static List<String> parseArguments(String input) {
+        List<String> args = new ArrayList<>();
+        StringBuilder currentArg = new StringBuilder();
+        boolean inSingleQuotes = false;
+        boolean explicitArgument = false; // Track empty tokens like ''
+
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+
+            if (c == '\'') {
+                inSingleQuotes = !inSingleQuotes;
+                explicitArgument = true; // Flag that quotes were processed
+            } else if (c == ' ' && !inSingleQuotes) {
+                // End of an argument token reached via space delimiter
+                if (currentArg.length() > 0 || explicitArgument) {
+                    args.add(currentArg.toString());
+                    currentArg.setLength(0);
+                    explicitArgument = false;
+                }
+            } else {
+                currentArg.append(c);
+            }
+        }
+
+        // Add the final remaining token sequence
+        if (currentArg.length() > 0 || explicitArgument) {
+            args.add(currentArg.toString());
+        }
+
+        return args;
     }
 
     private static Path findExecutable(String command) {
