@@ -15,14 +15,14 @@ public class Main {
     private static class Job {
         int jobNumber;
         long pid;
-        String commandString;
+        String baseCommandString; // Just the command arguments joined without the &
         String status;
         Process process;
 
-        Job(int jobNumber, long pid, String commandString, Process process) {
+        Job(int jobNumber, long pid, String baseCommandString, Process process) {
             this.jobNumber = jobNumber;
             this.pid = pid;
-            this.commandString = commandString;
+            this.baseCommandString = baseCommandString;
             this.status = "Running";
             this.process = process;
         }
@@ -44,8 +44,6 @@ public class Main {
                 continue;
             }
 
-            String rawCommandString = input;
-
             List<String> parsedTokens = parseArguments(input);
             if (parsedTokens.isEmpty()) {
                 continue;
@@ -61,6 +59,9 @@ public class Main {
             if (parsedTokens.isEmpty()) {
                 continue;
             }
+
+            // Reconstruct a normalized base string string from remaining tokens
+            String baseCommandString = String.join(" ", parsedTokens);
 
             // --- REDIRECTION PARSING ---
             String outputFile = null;
@@ -116,7 +117,7 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
-                // --- FIXED JOBS BUILTIN IMPLEMENTATION ---
+                // --- ROBUST REAPING JOBS LOGIC ---
                 else if (command.equals("jobs")) {
                     int totalJobs = activeJobs.size();
                     List<Job> jobsToRemove = new ArrayList<>();
@@ -124,15 +125,9 @@ public class Main {
                     for (int i = 0; i < totalJobs; i++) {
                         Job job = activeJobs.get(i);
                         
-                        // Sync dead processes up to "Done" status
+                        // Check process status without blocking
                         if (!job.process.isAlive() && !job.status.equals("Done")) {
                             job.status = "Done";
-                            
-                            // Strip ampersand cleanly, ignoring variable spaces
-                            if (job.commandString.endsWith("&")) {
-                                String stripped = job.commandString.substring(0, job.commandString.length() - 1).trim();
-                                job.commandString = stripped;
-                            }
                             jobsToRemove.add(job);
                         }
 
@@ -143,11 +138,16 @@ public class Main {
                             marker = '-';
                         }
 
+                        // Done processes drop the trailing ampersand token cleanly
+                        String finalCommandOutput = job.status.equals("Done") 
+                                ? job.baseCommandString 
+                                : job.baseCommandString + " &";
+
                         String formattedStatus = String.format("%-24s", job.status);
-                        System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + job.commandString);
+                        System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + finalCommandOutput);
                     }
                     
-                    // Post-processing eviction avoids indexing corruption
+                    // Clear out reaped rows from the active table after the loop prints
                     activeJobs.removeAll(jobsToRemove);
                     System.out.flush();
                 }
@@ -246,7 +246,7 @@ public class Main {
                         System.out.println("[" + nextJobNumber + "] " + process.pid());
                         System.out.flush();
                         
-                        activeJobs.add(new Job(nextJobNumber, process.pid(), rawCommandString, process));
+                        activeJobs.add(new Job(nextJobNumber, process.pid(), baseCommandString, process));
                         nextJobNumber++;
                     } else {
                         process.waitFor();
