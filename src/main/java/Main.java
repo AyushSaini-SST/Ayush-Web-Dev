@@ -23,7 +23,7 @@ public class Main {
                 continue;
             }
 
-            // Parse the command line into arguments respecting single quotes
+            // Parse the command line into arguments respecting both single and double quotes
             List<String> parsedTokens = parseArguments(input);
             if (parsedTokens.isEmpty()) {
                 continue;
@@ -75,7 +75,6 @@ public class Main {
 
             // echo builtin
             else if (command.equals("echo")) {
-                // Joint elements starting from index 1 with a single space
                 List<String> echoArgs = parsedTokens.subList(1, parsedTokens.size());
                 System.out.println(String.join(" ", echoArgs));
             }
@@ -124,33 +123,40 @@ public class Main {
 
     /**
      * Parses a raw shell input line into discrete arguments.
-     * Preserves inner single-quoted spaces and handles literal sequences cleanly.
+     * Preserves inner quoted spaces for both single and double quotes.
      */
     private static List<String> parseArguments(String input) {
         List<String> args = new ArrayList<>();
         StringBuilder currentArg = new StringBuilder();
         boolean inSingleQuotes = false;
-        boolean explicitArgument = false; // Track empty tokens like ''
+        boolean inDoubleQuotes = false;
+        boolean explicitArgument = false; // Flags empty quoted tokens like "" or ''
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            if (c == '\'') {
+            if (c == '\'' && !inDoubleQuotes) {
+                // Toggle single quote state if we aren't inside double quotes
                 inSingleQuotes = !inSingleQuotes;
-                explicitArgument = true; // Flag that quotes were processed
-            } else if (c == ' ' && !inSingleQuotes) {
-                // End of an argument token reached via space delimiter
+                explicitArgument = true;
+            } else if (c == '"' && !inSingleQuotes) {
+                // Toggle double quote state if we aren't inside single quotes
+                inDoubleQuotes = !inDoubleQuotes;
+                explicitArgument = true;
+            } else if (c == ' ' && !inSingleQuotes && !inDoubleQuotes) {
+                // We reached an unquoted space boundary -> save the current argument
                 if (currentArg.length() > 0 || explicitArgument) {
                     args.add(currentArg.toString());
                     currentArg.setLength(0);
                     explicitArgument = false;
                 }
             } else {
+                // Append literal character
                 currentArg.append(c);
             }
         }
 
-        // Add the final remaining token sequence
+        // Add final remaining argument block if it exists
         if (currentArg.length() > 0 || explicitArgument) {
             args.add(currentArg.toString());
         }
