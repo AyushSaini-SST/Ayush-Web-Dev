@@ -14,7 +14,7 @@ public class Main {
         String baseCommandString; 
         String status;
         List<Process> processes;
-        List<Thread> pipelineThreads; // Track built-in threads if backgrounded
+        List<Thread> pipelineThreads;
 
         Job(int jobNumber, long pid, String baseCommandString, List<Process> processes, List<Thread> pipelineThreads) {
             this.jobNumber = jobNumber;
@@ -71,7 +71,6 @@ public class Main {
         System.out.flush();
     }
 
-    // Executes a built-in inline while allowing standard stream overrides
     private static void executeBuiltin(List<String> tokens, InputStream in, PrintStream out, PrintStream err) {
         String command = tokens.get(0);
         if (command.equals("pwd")) {
@@ -93,7 +92,6 @@ public class Main {
                 }
             }
         } else if (command.equals("jobs")) {
-            // Contextual jobs printing
             for (Job job : activeJobs) {
                 String formattedStatus = String.format("%-24s", job.status);
                 out.println("[" + job.jobNumber + "]+  " + formattedStatus + job.baseCommandString + " &");
@@ -128,137 +126,118 @@ public class Main {
                 baseCommandString = baseCommandString.substring(0, baseCommandString.length() - 1).trim();
             }
 
-            int pipeIndex = -1;
-            for (int i = 0; i < parsedTokens.size(); i++) {
-                if (parsedTokens.get(i).equals("|")) {
-                    pipeIndex = i;
-                    break;
-                }
-            }
+            // --- MULTI-STAGE PIPELINE HANDLING ---
+            boolean hasPipe = parsedTokens.contains("|");
 
-            // --- PIPELINE COMPATIBLE WITH BUILT-INS ---
-            if (pipeIndex != -1) {
-                List<String> leftTokens = new ArrayList<>(parsedTokens.subList(0, pipeIndex));
-                List<String> rightTokens = new ArrayList<>(parsedTokens.subList(pipeIndex + 1, parsedTokens.size()));
-
-                if (leftTokens.isEmpty() || rightTokens.isEmpty()) continue;
-
-                String leftCmd = leftTokens.get(0);
-                String rightCmd = rightTokens.get(0);
-
-                boolean leftIsBuiltin = BUILTINS.contains(leftCmd);
-                boolean rightIsBuiltin = BUILTINS.contains(rightCmd);
-
-                // Case 1: Both are external commands (use optimized native OS pipeline execution)
-                if (!leftIsBuiltin && !rightIsBuiltin) {
-                    Path leftExec = findExecutable(leftCmd);
-                    Path rightExec = findExecutable(rightCmd);
-
-                    if (leftExec == null) { System.out.println(leftCmd + ": command not found"); continue; }
-                    if (rightExec == null) { System.out.println(rightCmd + ": command not found"); continue; }
-
-                    leftTokens.set(0, leftExec.toAbsolutePath().toString());
-                    rightTokens.set(0, rightExec.toAbsolutePath().toString());
-
-                    ProcessBuilder pbLeft = new ProcessBuilder(leftTokens).directory(currentDirectory.toFile());
-                    ProcessBuilder pbRight = new ProcessBuilder(rightTokens).directory(currentDirectory.toFile());
-
-                    pbLeft.redirectInput(ProcessBuilder.Redirect.INHERIT);
-                    pbRight.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                    pbLeft.redirectError(ProcessBuilder.Redirect.INHERIT);
-                    pbRight.redirectError(ProcessBuilder.Redirect.INHERIT);
-
-                    List<Process> pipelineProcesses = ProcessBuilder.startPipeline(List.of(pbLeft, pbRight));
-
-                    if (isBackground) {
-                        int assignedJobNumber = activeJobs.isEmpty() ? 1 : activeJobs.stream().mapToInt(j -> j.jobNumber).max().orElse(0) + 1;
-                        long reportPid = pipelineProcesses.get(pipelineProcesses.size() - 1).pid();
-                        System.out.println("[" + assignedJobNumber + "] " + reportPid);
-                        activeJobs.add(new Job(assignedJobNumber, reportPid, baseCommandString, pipelineProcesses, null));
+            if (hasPipe) {
+                List<List<String>> stages = new ArrayList<>();
+                List<String> currentStage = new ArrayList<>();
+                
+                for (String token : parsedTokens) {
+                    if (token.equals("|")) {
+                        if (!currentStage.isEmpty()) {
+                            stages.add(currentStage);
+                            currentStage = new ArrayList<>();
+                        }
                     } else {
-                        for (Process p : pipelineProcesses) p.waitFor();
+                        currentStage.add(token);
                     }
-                } 
-                // Case 2: One or both are built-in commands (Threaded Pipe Broker)
-                else {
-                    PipedOutputStream pipedOut = new PipedOutputStream();
-                    PipedInputStream pipedIn = new PipedInputStream(pipedOut);
+                }
+                if (!currentStage.isEmpty()) {
+                    stages.add(currentStage);
+                }
 
-                    List<Process> trackedProcesses = new ArrayList<>();
-                    List<Thread> trackedThreads = new ArrayList<>();
+                int numStages = stages.size();
+                List<Process> trackedProcesses = new ArrayList<>();
+                List<Thread> trackedThreads = new ArrayList<>();
 
-                    // Start Left Component
-                    if (leftIsBuiltin) {
-                        Thread leftThread = new Thread(() -> {
-                            try (PrintStream out = new PrintStream(pipedOut)) {
-                                executeBuiltin(leftTokens, System.in, out, System.err);
+                // Prepare input and output pipe arrays
+                InputStream currentIn = System.in;
+
+                for (int i = 0; i < numStages; i++) {
+                    List<String> stageTokens = stages.get(i);
+                    String cmd = stageTokens.get(0);
+                    boolean isBuiltin = BUILTINS.contains(cmd);
+
+                    // Determine stage output destination
+                    OutputStream nextOut;
+                    InputStream nextInStream = null;
+                    if (i < numStages - 1) {
+                        PipedOutputStream po = new PipedOutputStream();
+                        nextInStream = new PipedInputStream(po);
+                        nextOut = po;
+                    } else {
+                        nextOut = System.out;
+                    }
+
+                    final InputStream finalIn = currentIn;
+                    final OutputStream finalOut = nextOut;
+
+                    if (isBuiltin) {
+                        Thread thread = new Thread(() -> {
+                            try (PrintStream outPrint = new PrintStream(finalOut)) {
+                                executeBuiltin(stageTokens, finalIn, outPrint, System.err);
+                            } finally {
+                                if (finalIn != System.in) {
+                                    try { finalIn.close(); } catch (IOException ignored) {}
+                                }
                             }
                         });
-                        trackedThreads.add(leftThread);
-                        leftThread.start();
+                        trackedThreads.add(thread);
+                        thread.start();
                     } else {
-                        Path leftExec = findExecutable(leftCmd);
-                        if (leftExec != null) {
-                            leftTokens.set(0, leftExec.toAbsolutePath().toString());
-                            ProcessBuilder pbLeft = new ProcessBuilder(leftTokens).directory(currentDirectory.toFile());
-                            pbLeft.redirectInput(ProcessBuilder.Redirect.INHERIT);
-                            pbLeft.redirectError(ProcessBuilder.Redirect.INHERIT);
-                            Process pLeft = pbLeft.start();
-                            trackedProcesses.add(pLeft);
+                        Path execPath = findExecutable(cmd);
+                        if (execPath != null) {
+                            stageTokens.set(0, execPath.toAbsolutePath().toString());
+                            ProcessBuilder pb = new ProcessBuilder(stageTokens).directory(currentDirectory.toFile());
+                            
+                            // If it's not reading from the start terminal stdin, we pipe manually via threads
+                            if (finalIn == System.in) {
+                                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                            }
+                            if (finalOut == System.out) {
+                                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                            }
+                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
 
-                            // Forward pLeft's output stream into our piped input stream proxy link
-                            Thread forwarder = new Thread(() -> {
-                                try (InputStream is = pLeft.getInputStream(); OutputStream os = pipedOut) {
-                                    is.transferTo(os);
-                                } catch (IOException ignored) {}
-                            });
-                            trackedThreads.add(forwarder);
-                            forwarder.start();
+                            Process process = pb.start();
+                            trackedProcesses.add(process);
+
+                            // Manage streaming asynchronously if intermediaries exist
+                            if (finalIn != System.in) {
+                                Thread inputForwarder = new Thread(() -> {
+                                    try (InputStream is = finalIn; OutputStream os = process.getOutputStream()) {
+                                        is.transferTo(os);
+                                    } catch (IOException ignored) {}
+                                });
+                                trackedThreads.add(inputForwarder);
+                                inputForwarder.start();
+                            }
+                            if (finalOut != System.out) {
+                                Thread outputForwarder = new Thread(() -> {
+                                    try (InputStream is = process.getInputStream(); OutputStream os = finalOut) {
+                                        is.transferTo(os);
+                                    } catch (IOException ignored) {}
+                                });
+                                trackedThreads.add(outputForwarder);
+                                outputForwarder.start();
+                            }
                         } else {
-                            System.out.println(leftCmd + ": command not found");
+                            System.out.println(cmd + ": command not found");
                         }
                     }
 
-                    // Start Right Component
-                    if (rightIsBuiltin) {
-                        Thread rightThread = new Thread(() -> {
-                            executeBuiltin(rightTokens, pipedIn, System.out, System.err);
-                            try { pipedIn.close(); } catch (IOException ignored) {}
-                        });
-                        trackedThreads.add(rightThread);
-                        rightThread.start();
-                    } else {
-                        Path rightExec = findExecutable(rightCmd);
-                        if (rightExec != null) {
-                            rightTokens.set(0, rightExec.toAbsolutePath().toString());
-                            ProcessBuilder pbRight = new ProcessBuilder(rightTokens).directory(currentDirectory.toFile());
-                            pbRight.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                            pbRight.redirectError(ProcessBuilder.Redirect.INHERIT);
-                            Process pRight = pbRight.start();
-                            trackedProcesses.add(pRight);
+                    currentIn = nextInStream;
+                }
 
-                            // Forward proxy linked output pipe data straight to pRight's target standard input buffer
-                            Thread forwarder = new Thread(() -> {
-                                try (InputStream is = pipedIn; OutputStream os = pRight.getOutputStream()) {
-                                    is.transferTo(os);
-                                } catch (IOException ignored) {}
-                            });
-                            trackedThreads.add(forwarder);
-                            forwarder.start();
-                        } else {
-                            System.out.println(rightCmd + ": command not found");
-                        }
-                    }
-
-                    if (isBackground) {
-                        int assignedJobNumber = activeJobs.isEmpty() ? 1 : activeJobs.stream().mapToInt(j -> j.jobNumber).max().orElse(0) + 1;
-                        long reportPid = trackedProcesses.isEmpty() ? ProcessHandle.current().pid() : trackedProcesses.get(trackedProcesses.size() - 1).pid();
-                        System.out.println("[" + assignedJobNumber + "] " + reportPid);
-                        activeJobs.add(new Job(assignedJobNumber, reportPid, baseCommandString, trackedProcesses, trackedThreads));
-                    } else {
-                        for (Thread t : trackedThreads) t.join();
-                        for (Process p : trackedProcesses) p.waitFor();
-                    }
+                if (isBackground) {
+                    int assignedJobNumber = activeJobs.isEmpty() ? 1 : activeJobs.stream().mapToInt(j -> j.jobNumber).max().orElse(0) + 1;
+                    long reportPid = trackedProcesses.isEmpty() ? ProcessHandle.current().pid() : trackedProcesses.get(trackedProcesses.size() - 1).pid();
+                    System.out.println("[" + assignedJobNumber + "] " + reportPid);
+                    activeJobs.add(new Job(assignedJobNumber, reportPid, baseCommandString, trackedProcesses, trackedThreads));
+                } else {
+                    for (Thread t : trackedThreads) t.join();
+                    for (Process p : trackedProcesses) p.waitFor();
                 }
                 continue;
             }
