@@ -31,7 +31,6 @@ public class Main {
     private static final List<Job> activeJobs = new ArrayList<>();
 
     // --- REAPING HELPER FUNCTION ---
-    // Checks for exited background processes, prints them as "Done", and removes them.
     private static void reapCompletedJobs() {
         int totalJobs = activeJobs.size();
         List<Job> jobsToRemove = new ArrayList<>();
@@ -56,7 +55,6 @@ public class Main {
             }
         }
         
-        // Evict reaped jobs so they are not processed or printed again
         activeJobs.removeAll(jobsToRemove);
         System.out.flush();
     }
@@ -158,10 +156,8 @@ public class Main {
                 }
                 // --- POINT 2: JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
-                    // Step A: Reap any dead processes right before showing the list
                     reapCompletedJobs();
 
-                    // Step B: List remaining active (Running) processes with fresh marker indexing
                     int totalJobs = activeJobs.size();
                     for (int i = 0; i < totalJobs; i++) {
                         Job job = activeJobs.get(i);
@@ -231,7 +227,6 @@ public class Main {
                         }
                     }
                 }
-                // External Commands Block
                 else {
                     Path executable = findExecutable(command);
 
@@ -280,7 +275,7 @@ public class Main {
                         process.waitFor();
                     }
                 }
-            } finalLine {
+            } finally { // Fixed token here
                 if (fileOutOrErr != null) {
                     fileOutOrErr.close();
                     System.setOut(originalOut);
