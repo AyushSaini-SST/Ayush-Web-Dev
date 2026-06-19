@@ -17,12 +17,14 @@ public class Main {
         long pid;
         String commandString;
         String status;
+        Process process;
 
-        Job(int jobNumber, long pid, String commandString) {
+        Job(int jobNumber, long pid, String commandString, Process process) {
             this.jobNumber = jobNumber;
             this.pid = pid;
             this.commandString = commandString;
             this.status = "Running";
+            this.process = process;
         }
     }
 
@@ -114,22 +116,37 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
-                // --- JOBS BUILTIN IMPLEMENTATION ---
+                // --- JOBS BUILTIN IMPLEMENTATION WITH REAPING ---
                 else if (command.equals("jobs")) {
                     int totalJobs = activeJobs.size();
+                    List<Job> jobsToRemove = new ArrayList<>();
+
                     for (int i = 0; i < totalJobs; i++) {
                         Job job = activeJobs.get(i);
-                        char marker = ' '; // Default to space for older jobs
                         
+                        // Check if the underlying OS background process has finished
+                        if (!job.process.isAlive()) {
+                            job.status = "Done";
+                            // For "Done" entries, remove any trailing amp "&" if it exists
+                            if (job.commandString.endsWith(" &")) {
+                                job.commandString = job.commandString.substring(0, job.commandString.length() - 2);
+                            }
+                            jobsToRemove.add(job);
+                        }
+
+                        char marker = ' ';
                         if (i == totalJobs - 1) {
-                            marker = '+'; // Most recent job
+                            marker = '+';
                         } else if (i == totalJobs - 2) {
-                            marker = '-'; // Second most recent job
+                            marker = '-';
                         }
 
                         String formattedStatus = String.format("%-24s", job.status);
                         System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + job.commandString);
                     }
+                    
+                    // Clean up reaped jobs from our active list so they don't print next time
+                    activeJobs.removeAll(jobsToRemove);
                     System.out.flush();
                 }
                 else if (command.equals("pwd")) {
@@ -144,7 +161,7 @@ public class Main {
                         targetPath = Path.of(homeEnv != null ? homeEnv : System.getProperty("user.home"));
                     } else if (pathStr.startsWith("~/")) {
                         String homeEnv = System.getenv("HOME");
-                        String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home");
+                        String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home"));
                         targetPath = Path.of(homeDir, pathStr.substring(2));
                     } else {
                         targetPath = Path.of(pathStr);
@@ -227,7 +244,8 @@ public class Main {
                         System.out.println("[" + nextJobNumber + "] " + process.pid());
                         System.out.flush();
                         
-                        activeJobs.add(new Job(nextJobNumber, process.pid(), rawCommandString));
+                        // Pass the Process handle into the tracking instance
+                        activeJobs.add(new Job(nextJobNumber, process.pid(), rawCommandString, process));
                         nextJobNumber++;
                     } else {
                         process.waitFor();
