@@ -181,6 +181,7 @@ public class Main {
                 // MIXED / BUILT-IN PIPELINE REDIRECTION
                 else {
                     List<Process> trackedProcesses = new ArrayList<>();
+                    List<Thread> trackedThreads = new ArrayList<>(); // Track threads to avoid race condition
                     InputStream currentIn = System.in;
 
                     for (int i = 0; i < stages.size(); i++) {
@@ -208,6 +209,7 @@ public class Main {
                                     }
                                 }
                             });
+                            trackedThreads.add(thread);
                             thread.start();
                         } else {
                             Path execPath = findExecutable(cmd);
@@ -228,9 +230,9 @@ public class Main {
                                             is.transferTo(os);
                                             os.flush();
                                         } catch (IOException ignored) {}
-                                        // CRITICAL FIX: Explicitly close the process output pipe to trigger EOF downstream
                                         try { process.getOutputStream().close(); } catch (IOException ignored) {}
                                     });
+                                    trackedThreads.add(inputForwarder);
                                     inputForwarder.start();
                                 }
                                 if (finalOut != System.out) {
@@ -242,6 +244,7 @@ public class Main {
                                         } catch (IOException ignored) {}
                                         try { loopOut.close(); } catch (IOException ignored) {}
                                     });
+                                    trackedThreads.add(outputForwarder);
                                     outputForwarder.start();
                                 }
                             } else {
@@ -252,6 +255,7 @@ public class Main {
                     }
 
                     if (!isBackground) {
+                        for (Thread t : trackedThreads) t.join(); // Block shell until builtin thread output is completely flushed
                         for (Process p : trackedProcesses) p.waitFor();
                     }
                 }
