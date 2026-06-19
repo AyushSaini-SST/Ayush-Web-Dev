@@ -7,8 +7,9 @@ import java.nio.file.Path;
 
 public class Main {
 
+    // Added "jobs" to the recognized builtins set
     private static final Set<String> BUILTINS =
-            Set.of("echo", "exit", "type", "pwd", "cd");
+            Set.of("echo", "exit", "type", "pwd", "cd", "jobs");
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
@@ -87,6 +88,11 @@ public class Main {
                 // exit builtin
                 if (command.equals("exit")) {
                     break;
+                }
+
+                // jobs builtin (Empty implementation for this stage)
+                else if (command.equals("jobs")) {
+                    // Intentionally left blank to return directly to the prompt with no output
                 }
 
                 // pwd builtin
@@ -168,7 +174,6 @@ public class Main {
                     ProcessBuilder pb = new ProcessBuilder(commandLine)
                             .directory(currentDirectory.toFile());
 
-                    // If redirection target exists for an external command
                     if (outputFile != null) {
                         File file = new File(outputFile);
                         File parent = file.getParentFile();
@@ -191,7 +196,6 @@ public class Main {
                     process.waitFor();
                 }
             } finally {
-                // Revert system output stream safely if it was hijacked for builtins
                 if (fileOutOrErr != null) {
                     fileOutOrErr.close();
                     System.setOut(originalOut);
