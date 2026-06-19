@@ -34,13 +34,15 @@ public class Main {
             // --- REDIRECTION PARSING ---
             String outputFile = null;
             int redirectIndex = -1;
+            boolean isStderrRedirect = false;
 
             for (int i = 0; i < parsedTokens.size(); i++) {
                 String token = parsedTokens.get(i);
-                if (token.equals(">") || token.equals("1>")) {
+                if (token.equals(">") || token.equals("1>") || token.equals("2>")) {
                     if (i + 1 < parsedTokens.size()) {
                         outputFile = parsedTokens.get(i + 1);
                         redirectIndex = i;
+                        isStderrRedirect = token.equals("2>");
                         break;
                     }
                 }
@@ -60,15 +62,22 @@ public class Main {
 
             // Handle redirection stream capturing for Builtins
             PrintStream originalOut = System.out;
-            PrintStream fileOut = null;
+            PrintStream originalErr = System.err;
+            PrintStream fileOutOrErr = null;
+
             if (outputFile != null && BUILTINS.contains(command)) {
                 File file = new File(outputFile);
                 File parent = file.getParentFile();
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-                fileOut = new PrintStream(new FileOutputStream(file));
-                System.setOut(fileOut);
+                fileOutOrErr = new PrintStream(new FileOutputStream(file));
+                
+                if (isStderrRedirect) {
+                    System.setErr(fileOutOrErr);
+                } else {
+                    System.setOut(fileOutOrErr);
+                }
             }
 
             try {
@@ -154,18 +163,25 @@ public class Main {
                     }
 
                     ProcessBuilder pb = new ProcessBuilder(commandLine)
-                            .directory(currentDirectory.toFile())
-                            .inheritIO();
+                            .directory(currentDirectory.toFile());
 
-                    // If redirection target exists for an external command, route it via ProcessBuilder
+                    // If redirection target exists for an external command
                     if (outputFile != null) {
                         File file = new File(outputFile);
                         File parent = file.getParentFile();
                         if (parent != null && !parent.exists()) {
                             parent.mkdirs();
                         }
-                        pb.redirectOutput(file);
-                        pb.redirectError(ProcessBuilder.Redirect.INHERIT); // Keep stderr on terminal
+                        
+                        if (isStderrRedirect) {
+                            pb.redirectError(file);
+                            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT); // Keep stdout on terminal
+                        } else {
+                            pb.redirectOutput(file);
+                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);  // Keep stderr on terminal
+                        }
+                    } else {
+                        pb.inheritIO();
                     }
 
                     Process process = pb.start();
@@ -173,9 +189,10 @@ public class Main {
                 }
             } finally {
                 // Revert system output stream safely if it was hijacked for builtins
-                if (fileOut != null) {
-                    fileOut.close();
+                if (fileOutOrErr != null) {
+                    fileOutOrErr.close();
                     System.setOut(originalOut);
+                    System.setErr(originalErr);
                 }
             }
         }
