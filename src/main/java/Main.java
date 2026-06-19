@@ -23,7 +23,7 @@ public class Main {
                 continue;
             }
 
-            // Parse the command line into arguments respecting quotes and backslash escapes
+            // Parse the command line into arguments respecting quotes and selective backslash escapes
             List<String> parsedTokens = parseArguments(input);
             if (parsedTokens.isEmpty()) {
                 continue;
@@ -123,7 +123,7 @@ public class Main {
 
     /**
      * Parses a raw shell input line into discrete arguments.
-     * Preserves inner quoted spaces and handles backslash escaping outside quotes.
+     * Preserves inner quoted spaces and handles backslash escaping inside/outside quotes.
      */
     private static List<String> parseArguments(String input) {
         List<String> args = new ArrayList<>();
@@ -135,12 +135,31 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            // Handle backslash escaping ONLY when completely outside quotes
+            // 1. Handle backslash escaping OUTSIDE quotes
             if (c == '\\' && !inSingleQuotes && !inDoubleQuotes) {
                 if (i + 1 < input.length()) {
-                    i++; // Advance pointer to consume the escaped character literally
+                    i++; 
                     currentArg.append(input.charAt(i));
                     explicitArgument = true;
+                }
+                continue;
+            }
+
+            // 2. Handle backslash escaping INSIDE double quotes
+            if (c == '\\' && inDoubleQuotes) {
+                if (i + 1 < input.length()) {
+                    char nextChar = input.charAt(i + 1);
+                    // Standard rules: only escape double quotes, backslashes, $, `, and newline
+                    if (nextChar == '"' || nextChar == '\\' || nextChar == '$' || nextChar == '`') {
+                        i++; // Consume backslash, point directly to the escaped character
+                        currentArg.append(nextChar);
+                    } else {
+                        // Keep backslash as a literal character
+                        currentArg.append(c);
+                    }
+                    explicitArgument = true;
+                } else {
+                    currentArg.append(c);
                 }
                 continue;
             }
