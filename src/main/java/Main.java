@@ -14,26 +14,19 @@ public class Main {
         String baseCommandString; 
         String status;
         List<Process> processes;
-        List<Thread> pipelineThreads;
 
-        Job(int jobNumber, long pid, String baseCommandString, List<Process> processes, List<Thread> pipelineThreads) {
+        Job(int jobNumber, long pid, String baseCommandString, List<Process> processes) {
             this.jobNumber = jobNumber;
             this.pid = pid;
             this.baseCommandString = baseCommandString;
             this.status = "Running";
             this.processes = processes;
-            this.pipelineThreads = pipelineThreads;
         }
 
         boolean isAlive() {
             if (processes != null) {
                 for (Process p : processes) {
                     if (p.isAlive()) return true;
-                }
-            }
-            if (pipelineThreads != null) {
-                for (Thread t : pipelineThreads) {
-                    if (t.isAlive()) return true;
                 }
             }
             return false;
@@ -127,9 +120,7 @@ public class Main {
             }
 
             // --- MULTI-STAGE PIPELINE HANDLING ---
-            boolean hasPipe = parsedTokens.contains("|");
-
-            if (hasPipe) {
+            if (parsedTokens.contains("|")) {
                 List<List<String>> stages = new ArrayList<>();
                 List<String> currentStage = new ArrayList<>();
                 
@@ -143,101 +134,122 @@ public class Main {
                         currentStage.add(token);
                     }
                 }
-                if (!currentStage.isEmpty()) {
-                    stages.add(currentStage);
+                if (!currentStage.isEmpty()) stages.add(currentStage);
+
+                boolean mixedPipeline = false;
+                for (List<String> stage : stages) {
+                    if (BUILTINS.contains(stage.get(0))) {
+                        mixedPipeline = true;
+                        break;
+                    }
                 }
 
-                int numStages = stages.size();
-                List<Process> trackedProcesses = new ArrayList<>();
-                List<Thread> trackedThreads = new ArrayList<>();
-
-                // Prepare input and output pipe arrays
-                InputStream currentIn = System.in;
-
-                for (int i = 0; i < numStages; i++) {
-                    List<String> stageTokens = stages.get(i);
-                    String cmd = stageTokens.get(0);
-                    boolean isBuiltin = BUILTINS.contains(cmd);
-
-                    // Determine stage output destination
-                    OutputStream nextOut;
-                    InputStream nextInStream = null;
-                    if (i < numStages - 1) {
-                        PipedOutputStream po = new PipedOutputStream();
-                        nextInStream = new PipedInputStream(po);
-                        nextOut = po;
-                    } else {
-                        nextOut = System.out;
-                    }
-
-                    final InputStream finalIn = currentIn;
-                    final OutputStream finalOut = nextOut;
-
-                    if (isBuiltin) {
-                        Thread thread = new Thread(() -> {
-                            try (PrintStream outPrint = new PrintStream(finalOut)) {
-                                executeBuiltin(stageTokens, finalIn, outPrint, System.err);
-                            } finally {
-                                if (finalIn != System.in) {
-                                    try { finalIn.close(); } catch (IOException ignored) {}
-                                }
-                            }
-                        });
-                        trackedThreads.add(thread);
-                        thread.start();
-                    } else {
-                        Path execPath = findExecutable(cmd);
-                        if (execPath != null) {
-                            stageTokens.set(0, execPath.toAbsolutePath().toString());
-                            ProcessBuilder pb = new ProcessBuilder(stageTokens).directory(currentDirectory.toFile());
-                            
-                            // If it's not reading from the start terminal stdin, we pipe manually via threads
-                            if (finalIn == System.in) {
-                                pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
-                            }
-                            if (finalOut == System.out) {
-                                pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-                            }
-                            pb.redirectError(ProcessBuilder.Redirect.INHERIT);
-
-                            Process process = pb.start();
-                            trackedProcesses.add(process);
-
-                            // Manage streaming asynchronously if intermediaries exist
-                            if (finalIn != System.in) {
-                                Thread inputForwarder = new Thread(() -> {
-                                    try (InputStream is = finalIn; OutputStream os = process.getOutputStream()) {
-                                        is.transferTo(os);
-                                    } catch (IOException ignored) {}
-                                });
-                                trackedThreads.add(inputForwarder);
-                                inputForwarder.start();
-                            }
-                            if (finalOut != System.out) {
-                                Thread outputForwarder = new Thread(() -> {
-                                    try (InputStream is = process.getInputStream(); OutputStream os = finalOut) {
-                                        is.transferTo(os);
-                                    } catch (IOException ignored) {}
-                                });
-                                trackedThreads.add(outputForwarder);
-                                outputForwarder.start();
-                            }
-                        } else {
-                            System.out.println(cmd + ": command not found");
+                // OPTIMIZED NATIVE OS PIPELINE FOR EXTERNAL COMMANDS ONLY
+                if (!mixedPipeline) {
+                    List<ProcessBuilder> builders = new ArrayList<>();
+                    boolean allFound = true;
+                    for (List<String> stage : stages) {
+                        Path execPath = findExecutable(stage.get(0));
+                        if (execPath == null) {
+                            System.out.println(stage.get(0) + ": command not found");
+                            allFound = false;
+                            break;
                         }
+                        stage.set(0, execPath.toAbsolutePath().toString());
+                        builders.add(new ProcessBuilder(stage).directory(currentDirectory.toFile()));
                     }
 
-                    currentIn = nextInStream;
-                }
+                    if (!allFound) continue;
 
-                if (isBackground) {
-                    int assignedJobNumber = activeJobs.isEmpty() ? 1 : activeJobs.stream().mapToInt(j -> j.jobNumber).max().orElse(0) + 1;
-                    long reportPid = trackedProcesses.isEmpty() ? ProcessHandle.current().pid() : trackedProcesses.get(trackedProcesses.size() - 1).pid();
-                    System.out.println("[" + assignedJobNumber + "] " + reportPid);
-                    activeJobs.add(new Job(assignedJobNumber, reportPid, baseCommandString, trackedProcesses, trackedThreads));
-                } else {
-                    for (Thread t : trackedThreads) t.join();
-                    for (Process p : trackedProcesses) p.waitFor();
+                    // Configure endpoints
+                    builders.get(0).redirectInput(ProcessBuilder.Redirect.INHERIT);
+                    builders.get(builders.size() - 1).redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                    for (ProcessBuilder pb : builders) {
+                        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+                    }
+
+                    List<Process> pipelineProcesses = ProcessBuilder.startPipeline(builders);
+
+                    if (isBackground) {
+                        int assignedJobNumber = activeJobs.isEmpty() ? 1 : activeJobs.stream().mapToInt(j -> j.jobNumber).max().orElse(0) + 1;
+                        long reportPid = pipelineProcesses.get(pipelineProcesses.size() - 1).pid();
+                        System.out.println("[" + assignedJobNumber + "] " + reportPid);
+                        activeJobs.add(new Job(assignedJobNumber, reportPid, baseCommandString, pipelineProcesses));
+                    } else {
+                        for (Process p : pipelineProcesses) p.waitFor();
+                    }
+                } 
+                // MIXED / BUILT-IN PIPELINE REDIRECTION
+                else {
+                    List<Process> trackedProcesses = new ArrayList<>();
+                    InputStream currentIn = System.in;
+
+                    for (int i = 0; i < stages.size(); i++) {
+                        List<String> stageTokens = stages.get(i);
+                        String cmd = stageTokens.get(0);
+                        boolean isLast = (i == stages.size() - 1);
+
+                        PipedOutputStream po = null;
+                        InputStream nextInStream = null;
+                        if (!isLast) {
+                            po = new PipedOutputStream();
+                            nextInStream = new PipedInputStream(po);
+                        }
+
+                        final InputStream finalIn = currentIn;
+                        final OutputStream finalOut = isLast ? System.out : po;
+
+                        if (BUILTINS.contains(cmd)) {
+                            Thread thread = new Thread(() -> {
+                                try (PrintStream outPrint = new PrintStream(finalOut)) {
+                                    executeBuiltin(stageTokens, finalIn, outPrint, System.err);
+                                } finally {
+                                    if (finalIn != System.in) {
+                                        try { finalIn.close(); } catch (IOException ignored) {}
+                                    }
+                                }
+                            });
+                            thread.start();
+                        } else {
+                            Path execPath = findExecutable(cmd);
+                            if (execPath != null) {
+                                stageTokens.set(0, execPath.toAbsolutePath().toString());
+                                ProcessBuilder pb = new ProcessBuilder(stageTokens).directory(currentDirectory.toFile());
+                                
+                                if (finalIn == System.in) pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                                if (finalOut == System.out) pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                                pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+
+                                Process process = pb.start();
+                                trackedProcesses.add(process);
+
+                                if (finalIn != System.in) {
+                                    Thread inputForwarder = new Thread(() -> {
+                                        try (InputStream is = finalIn; OutputStream os = process.getOutputStream()) {
+                                            is.transferTo(os);
+                                        } catch (IOException ignored) {}
+                                    });
+                                    inputForwarder.start();
+                                }
+                                if (finalOut != System.out) {
+                                    final OutputStream loopOut = finalOut;
+                                    Thread outputForwarder = new Thread(() -> {
+                                        try (InputStream is = process.getInputStream(); OutputStream os = loopOut) {
+                                            is.transferTo(os);
+                                        } catch (IOException ignored) {}
+                                    });
+                                    outputForwarder.start();
+                                }
+                            } else {
+                                System.out.println(cmd + ": command not found");
+                            }
+                        }
+                        currentIn = nextInStream;
+                    }
+
+                    if (!isBackground) {
+                        for (Process p : trackedProcesses) p.waitFor();
+                    }
                 }
                 continue;
             }
@@ -343,7 +355,7 @@ public class Main {
                     if (isBackground) {
                         int assignedJobNumber = activeJobs.isEmpty() ? 1 : activeJobs.stream().mapToInt(j -> j.jobNumber).max().orElse(0) + 1;
                         System.out.println("[" + assignedJobNumber + "] " + process.pid());
-                        activeJobs.add(new Job(assignedJobNumber, process.pid(), baseCommandString, List.of(process), null));
+                        activeJobs.add(new Job(assignedJobNumber, process.pid(), baseCommandString, List.of(process)));
                     } else {
                         process.waitFor();
                     }
