@@ -36,7 +36,19 @@ public class Main {
             // cd builtin
             else if (input.startsWith("cd ")) {
                 String pathStr = input.substring(3).trim();
-                Path targetPath = Path.of(pathStr);
+                Path targetPath;
+
+                // Handle the ~ (home directory) symbol
+                if (pathStr.equals("~")) {
+                    String homeEnv = System.getenv("HOME");
+                    targetPath = Path.of(homeEnv != null ? homeEnv : System.getProperty("user.home"));
+                } else if (pathStr.startsWith("~/")) {
+                    String homeEnv = System.getenv("HOME");
+                    String homeDir = homeEnv != null ? homeEnv : System.getProperty("user.home");
+                    targetPath = Path.of(homeDir, pathStr.substring(2));
+                } else {
+                    targetPath = Path.of(pathStr);
+                }
 
                 // If path is not absolute, resolve it relative to currentDirectory
                 if (!targetPath.isAbsolute()) {
