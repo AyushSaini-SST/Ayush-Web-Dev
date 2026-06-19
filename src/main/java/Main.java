@@ -161,7 +161,6 @@ public class Main {
 
                     if (!allFound) continue;
 
-                    // Configure endpoints
                     builders.get(0).redirectInput(ProcessBuilder.Redirect.INHERIT);
                     builders.get(builders.size() - 1).redirectOutput(ProcessBuilder.Redirect.INHERIT);
                     for (ProcessBuilder pb : builders) {
@@ -227,7 +226,10 @@ public class Main {
                                     Thread inputForwarder = new Thread(() -> {
                                         try (InputStream is = finalIn; OutputStream os = process.getOutputStream()) {
                                             is.transferTo(os);
+                                            os.flush();
                                         } catch (IOException ignored) {}
+                                        // CRITICAL FIX: Explicitly close the process output pipe to trigger EOF downstream
+                                        try { process.getOutputStream().close(); } catch (IOException ignored) {}
                                     });
                                     inputForwarder.start();
                                 }
@@ -236,7 +238,9 @@ public class Main {
                                     Thread outputForwarder = new Thread(() -> {
                                         try (InputStream is = process.getInputStream(); OutputStream os = loopOut) {
                                             is.transferTo(os);
+                                            os.flush();
                                         } catch (IOException ignored) {}
+                                        try { loopOut.close(); } catch (IOException ignored) {}
                                     });
                                     outputForwarder.start();
                                 }
