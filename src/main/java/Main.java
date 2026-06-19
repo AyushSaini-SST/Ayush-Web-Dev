@@ -23,7 +23,7 @@ public class Main {
                 continue;
             }
 
-            // Parse the command line into arguments respecting both single and double quotes
+            // Parse the command line into arguments respecting quotes and backslash escapes
             List<String> parsedTokens = parseArguments(input);
             if (parsedTokens.isEmpty()) {
                 continue;
@@ -123,40 +123,45 @@ public class Main {
 
     /**
      * Parses a raw shell input line into discrete arguments.
-     * Preserves inner quoted spaces for both single and double quotes.
+     * Preserves inner quoted spaces and handles backslash escaping outside quotes.
      */
     private static List<String> parseArguments(String input) {
         List<String> args = new ArrayList<>();
         StringBuilder currentArg = new StringBuilder();
         boolean inSingleQuotes = false;
         boolean inDoubleQuotes = false;
-        boolean explicitArgument = false; // Flags empty quoted tokens like "" or ''
+        boolean explicitArgument = false; // Flags empty quoted tokens
 
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
+            // Handle backslash escaping when outside quotes
+            if (c == '\\' && !inSingleQuotes && !inDoubleQuotes) {
+                if (i + 1 < input.length()) {
+                    i++; // Advance pointer to consume the escaped character literally
+                    currentArg.append(input.charAt(i));
+                    explicitArgument = true;
+                }
+                continue;
+            }
+
             if (c == '\'' && !inDoubleQuotes) {
-                // Toggle single quote state if we aren't inside double quotes
                 inSingleQuotes = !inSingleQuotes;
                 explicitArgument = true;
             } else if (c == '"' && !inSingleQuotes) {
-                // Toggle double quote state if we aren't inside single quotes
                 inDoubleQuotes = !inDoubleQuotes;
                 explicitArgument = true;
             } else if (c == ' ' && !inSingleQuotes && !inDoubleQuotes) {
-                // We reached an unquoted space boundary -> save the current argument
                 if (currentArg.length() > 0 || explicitArgument) {
                     args.add(currentArg.toString());
                     currentArg.setLength(0);
                     explicitArgument = false;
                 }
             } else {
-                // Append literal character
                 currentArg.append(c);
             }
         }
 
-        // Add final remaining argument block if it exists
         if (currentArg.length() > 0 || explicitArgument) {
             args.add(currentArg.toString());
         }
