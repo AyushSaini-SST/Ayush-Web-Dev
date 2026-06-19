@@ -15,7 +15,7 @@ public class Main {
     private static class Job {
         int jobNumber;
         long pid;
-        String baseCommandString; // The exact literal command input without the trailing &
+        String baseCommandString; 
         String status;
         Process process;
 
@@ -30,25 +30,55 @@ public class Main {
 
     private static final List<Job> activeJobs = new ArrayList<>();
 
+    // --- REAPING HELPER FUNCTION ---
+    // Checks for exited background processes, prints them as "Done", and removes them.
+    private static void reapCompletedJobs() {
+        int totalJobs = activeJobs.size();
+        List<Job> jobsToRemove = new ArrayList<>();
+
+        for (int i = 0; i < totalJobs; i++) {
+            Job job = activeJobs.get(i);
+            
+            if (!job.process.isAlive()) {
+                job.status = "Done";
+                jobsToRemove.add(job);
+
+                // Calculate its marker at the exact time it is being reaped
+                char marker = ' ';
+                if (i == totalJobs - 1) {
+                    marker = '+';
+                } else if (i == totalJobs - 2) {
+                    marker = '-';
+                }
+
+                String formattedStatus = String.format("%-24s", job.status);
+                System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + job.baseCommandString);
+            }
+        }
+        
+        // Evict reaped jobs so they are not processed or printed again
+        activeJobs.removeAll(jobsToRemove);
+        System.out.flush();
+    }
+
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
         Path currentDirectory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
 
         while (true) {
+            // --- POINT 1: AUTOMATIC REAPING BEFORE PROMPT ---
+            reapCompletedJobs();
+
             System.out.print("$ ");
             System.out.flush();
 
+            if (!scanner.hasNextLine()) {
+                break;
+            }
             String input = scanner.nextLine().trim();
 
             if (input.isEmpty()) {
                 continue;
-            }
-
-            // --- EXTRACT EXACT RAW COMMAND STRING ---
-            // Extract a literal string of the command to preserve formatting/quoting
-            String baseCommandString = input;
-            if (baseCommandString.endsWith("&")) {
-                baseCommandString = baseCommandString.substring(0, baseCommandString.length() - 1).trim();
             }
 
             List<String> parsedTokens = parseArguments(input);
@@ -65,6 +95,11 @@ public class Main {
 
             if (parsedTokens.isEmpty()) {
                 continue;
+            }
+
+            String baseCommandString = input;
+            if (baseCommandString.endsWith("&")) {
+                baseCommandString = baseCommandString.substring(0, baseCommandString.length() - 1).trim();
             }
 
             // --- REDIRECTION PARSING ---
@@ -121,20 +156,16 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
-                // --- ROBUST REAPING JOBS LOGIC ---
+                // --- POINT 2: JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
-                    int totalJobs = activeJobs.size();
-                    List<Job> jobsToRemove = new ArrayList<>();
+                    // Step A: Reap any dead processes right before showing the list
+                    reapCompletedJobs();
 
+                    // Step B: List remaining active (Running) processes with fresh marker indexing
+                    int totalJobs = activeJobs.size();
                     for (int i = 0; i < totalJobs; i++) {
                         Job job = activeJobs.get(i);
                         
-                        // Check process status without blocking
-                        if (!job.process.isAlive() && !job.status.equals("Done")) {
-                            job.status = "Done";
-                            jobsToRemove.add(job);
-                        }
-
                         char marker = ' ';
                         if (i == totalJobs - 1) {
                             marker = '+';
@@ -142,17 +173,10 @@ public class Main {
                             marker = '-';
                         }
 
-                        // Use the exact string configuration expected by the test framework
-                        String finalCommandOutput = job.status.equals("Done") 
-                                ? job.baseCommandString 
-                                : job.baseCommandString + " &";
-
+                        String finalCommandOutput = job.baseCommandString + " &";
                         String formattedStatus = String.format("%-24s", job.status);
                         System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + finalCommandOutput);
                     }
-                    
-                    // Clear out reaped rows from the active table after the loop prints
-                    activeJobs.removeAll(jobsToRemove);
                     System.out.flush();
                 }
                 else if (command.equals("pwd")) {
@@ -256,7 +280,7 @@ public class Main {
                         process.waitFor();
                     }
                 }
-            } finally {
+            } finalLine {
                 if (fileOutOrErr != null) {
                     fileOutOrErr.close();
                     System.setOut(originalOut);
