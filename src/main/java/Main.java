@@ -29,6 +29,7 @@ public class Main {
                 continue;
             }
 
+            // The first token is ALWAYS the command name, with outer quotes already stripped out!
             String command = parsedTokens.get(0);
 
             // exit builtin
@@ -99,7 +100,7 @@ public class Main {
                 }
             }
 
-            // external commands
+            // external commands (handles quoted paths/names seamlessly)
             else {
                 Path executable = findExecutable(command);
 
@@ -107,6 +108,9 @@ public class Main {
                     System.out.println(command + ": command not found");
                     continue;
                 }
+
+                // Replace the unquoted raw string at index 0 with the full path to the executable
+                parsedTokens.set(0, executable.toString());
 
                 // Pass the correctly parsed arguments directly to ProcessBuilder
                 Process process = new ProcessBuilder(parsedTokens)
@@ -149,12 +153,10 @@ public class Main {
             if (c == '\\' && inDoubleQuotes) {
                 if (i + 1 < input.length()) {
                     char nextChar = input.charAt(i + 1);
-                    // Standard rules: only escape double quotes, backslashes, $, `, and newline
                     if (nextChar == '"' || nextChar == '\\' || nextChar == '$' || nextChar == '`') {
-                        i++; // Consume backslash, point directly to the escaped character
+                        i++; 
                         currentArg.append(nextChar);
                     } else {
-                        // Keep backslash as a literal character
                         currentArg.append(c);
                     }
                     explicitArgument = true;
@@ -189,14 +191,21 @@ public class Main {
     }
 
     private static Path findExecutable(String command) {
-        String pathEnv = System.getenv("PATH");
+        // If the command is already an absolute or relative file path, check it directly
+        Path directPath = Path.of(command);
+        if (directPath.isAbsolute() || command.contains(File.separator)) {
+            if (Files.exists(directPath) && Files.isExecutable(directPath)) {
+                return directPath;
+            }
+            return null;
+        }
 
+        String pathEnv = System.getenv("PATH");
         if (pathEnv == null) {
             return null;
         }
 
         String[] directories = pathEnv.split(File.pathSeparator);
-
         for (String dir : directories) {
             Path candidate = Path.of(dir, command);
 
