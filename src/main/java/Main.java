@@ -15,14 +15,23 @@ public class Main {
         long pid;
         String baseCommandString; 
         String status;
-        Process process;
+        List<Process> processes;
 
-        Job(int jobNumber, long pid, String baseCommandString, Process process) {
+        Job(int jobNumber, long pid, String baseCommandString, List<Process> processes) {
             this.jobNumber = jobNumber;
             this.pid = pid;
             this.baseCommandString = baseCommandString;
             this.status = "Running";
-            this.process = process;
+            this.processes = processes;
+        }
+
+        boolean isAlive() {
+            for (Process p : processes) {
+                if (p.isAlive()) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 
@@ -30,9 +39,8 @@ public class Main {
 
     // --- REAPING & PRINTING LOGIC ---
     private static void reapAndPrintJobs(boolean isJobsBuiltin) {
-        // Step 1: Check and update statuses first without printing or removing yet
         for (Job job : activeJobs) {
-            if ("Running".equals(job.status) && !job.process.isAlive()) {
+            if ("Running".equals(job.status) && !job.isAlive()) {
                 job.status = "Done";
             }
         }
@@ -40,7 +48,6 @@ public class Main {
         int totalJobs = activeJobs.size();
         List<Job> jobsToRemove = new ArrayList<>();
 
-        // Step 2: Loop through in sequential order to print with correct markers
         for (int i = 0; i < totalJobs; i++) {
             Job job = activeJobs.get(i);
             
@@ -62,7 +69,6 @@ public class Main {
             }
         }
         
-        // Step 3: Clean up reaped jobs from the table completely
         activeJobs.removeAll(jobsToRemove);
         System.out.flush();
     }
@@ -72,7 +78,6 @@ public class Main {
         Path currentDirectory = Path.of(System.getProperty("user.dir")).toAbsolutePath();
 
         while (true) {
-            // --- POINT 1: AUTOMATIC REAPING BEFORE PROMPT ---
             reapAndPrintJobs(false);
 
             System.out.print("$ ");
@@ -106,6 +111,74 @@ public class Main {
             String baseCommandString = input;
             if (baseCommandString.endsWith("&")) {
                 baseCommandString = baseCommandString.substring(0, baseCommandString.length() - 1).trim();
+            }
+
+            // --- DETECT PIPELINE OPERATOR ---
+            int pipeIndex = -1;
+            for (int i = 0; i < parsedTokens.size(); i++) {
+                if (parsedTokens.get(i).equals("|")) {
+                    pipeIndex = i;
+                    break;
+                }
+            }
+
+            // --- BLOCK: PIPELINE PROCESSING ---
+            if (pipeIndex != -1) {
+                List<String> leftTokens = new ArrayList<>(parsedTokens.subList(0, pipeIndex));
+                List<String> rightTokens = new ArrayList<>(parsedTokens.subList(pipeIndex + 1, parsedTokens.size()));
+
+                if (leftTokens.isEmpty() || rightTokens.isEmpty()) {
+                    continue;
+                }
+
+                Path leftExec = findExecutable(leftTokens.get(0));
+                Path rightExec = findExecutable(rightTokens.get(0));
+
+                if (leftExec == null) {
+                    System.out.println(leftTokens.get(0) + ": command not found");
+                    continue;
+                }
+                if (rightExec == null) {
+                    System.out.println(rightTokens.get(0) + ": command not found");
+                    continue;
+                }
+
+                leftTokens.set(0, leftExec.toAbsolutePath().toString());
+                rightTokens.set(0, rightExec.toAbsolutePath().toString());
+
+                ProcessBuilder pbLeft = new ProcessBuilder(leftTokens).directory(currentDirectory.toFile());
+                ProcessBuilder pbRight = new ProcessBuilder(rightTokens).directory(currentDirectory.toFile());
+
+                // Point pipeline IO correctly to match process expectations
+                pbLeft.redirectInput(ProcessBuilder.Redirect.INHERIT);
+                pbRight.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+                pbLeft.redirectError(ProcessBuilder.Redirect.INHERIT);
+                pbRight.redirectError(ProcessBuilder.Redirect.INHERIT);
+
+                List<Process> pipelineProcesses = ProcessBuilder.startPipeline(List.of(pbLeft, pbRight));
+
+                if (isBackground) {
+                    int assignedJobNumber = 1;
+                    if (!activeJobs.isEmpty()) {
+                        int maxJobNumber = 0;
+                        for (Job job : activeJobs) {
+                            if (job.jobNumber > maxJobNumber) {
+                                maxJobNumber = job.jobNumber;
+                            }
+                        }
+                        assignedJobNumber = maxJobNumber + 1;
+                    }
+                    long reportPid = pipelineProcesses.get(pipelineProcesses.size() - 1).pid();
+                    System.out.println("[" + assignedJobNumber + "] " + reportPid);
+                    System.out.flush();
+                    
+                    activeJobs.add(new Job(assignedJobNumber, reportPid, baseCommandString, pipelineProcesses));
+                } else {
+                    for (Process p : pipelineProcesses) {
+                        p.waitFor();
+                    }
+                }
+                continue;
             }
 
             // --- REDIRECTION PARSING ---
@@ -162,7 +235,6 @@ public class Main {
                 if (command.equals("exit")) {
                     break;
                 }
-                // --- POINT 2: JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
                     reapAndPrintJobs(true);
                 }
@@ -218,7 +290,6 @@ public class Main {
                         }
                     }
                 }
-                // External Commands Block
                 else {
                     Path executable = findExecutable(command);
 
@@ -258,7 +329,6 @@ public class Main {
                     Process process = pb.start();
 
                     if (isBackground) {
-                        // --- DYNAMIC RECYCLING OF JOB NUMBERS ---
                         int assignedJobNumber = 1;
                         if (!activeJobs.isEmpty()) {
                             int maxJobNumber = 0;
@@ -273,7 +343,7 @@ public class Main {
                         System.out.println("[" + assignedJobNumber + "] " + process.pid());
                         System.out.flush();
                         
-                        activeJobs.add(new Job(assignedJobNumber, process.pid(), baseCommandString, process));
+                        activeJobs.add(new Job(assignedJobNumber, process.pid(), baseCommandString, List.of(process)));
                     } else {
                         process.waitFor();
                     }
