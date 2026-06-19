@@ -38,11 +38,14 @@ public class Main {
                 String pathStr = input.substring(3).trim();
                 Path targetPath = Path.of(pathStr);
 
-                // For this stage, handling absolute paths
+                // If path is not absolute, resolve it relative to currentDirectory
                 if (!targetPath.isAbsolute()) {
                     targetPath = currentDirectory.resolve(targetPath).normalize();
+                } else {
+                    targetPath = targetPath.normalize();
                 }
 
+                // Verify the directory exists and is a valid directory
                 if (Files.exists(targetPath) && Files.isDirectory(targetPath)) {
                     currentDirectory = targetPath.toAbsolutePath();
                 } else {
