@@ -7,9 +7,11 @@ import java.nio.file.Path;
 
 public class Main {
 
-    // Added "jobs" to the recognized builtins set
     private static final Set<String> BUILTINS =
             Set.of("echo", "exit", "type", "pwd", "cd", "jobs");
+    
+    // Track job numbers sequentially starting from 1
+    private static int nextJobNumber = 1;
 
     public static void main(String[] args) throws Exception {
         Scanner scanner = new Scanner(System.in);
@@ -28,6 +30,18 @@ public class Main {
 
             // Parse the command line into arguments respecting quotes and selective backslash escapes
             List<String> parsedTokens = parseArguments(input);
+            if (parsedTokens.isEmpty()) {
+                continue;
+            }
+
+            // --- BACKGROUND JOB CHECK ---
+            boolean isBackground = false;
+            if (parsedTokens.get(parsedTokens.size() - 1).equals("&")) {
+                isBackground = true;
+                // Remove the '&' token so it isn't passed as an argument to the executable
+                parsedTokens.remove(parsedTokens.size() - 1);
+            }
+
             if (parsedTokens.isEmpty()) {
                 continue;
             }
@@ -90,9 +104,9 @@ public class Main {
                     break;
                 }
 
-                // jobs builtin (Empty implementation for this stage)
+                // jobs builtin
                 else if (command.equals("jobs")) {
-                    // Intentionally left blank to return directly to the prompt with no output
+                    // Intentionally left blank for now
                 }
 
                 // pwd builtin
@@ -193,7 +207,16 @@ public class Main {
                     }
 
                     Process process = pb.start();
-                    process.waitFor();
+
+                    if (isBackground) {
+                        // Print background metadata information immediately
+                        System.out.println("[" + nextJobNumber + "] " + process.pid());
+                        nextJobNumber++;
+                        // Do NOT call process.waitFor(), loop back to prompt immediately
+                    } else {
+                        // Foreground task blocks execution until resolved
+                        process.waitFor();
+                    }
                 }
             } finally {
                 if (fileOutOrErr != null) {
@@ -203,8 +226,6 @@ public class Main {
                 }
             }
         }
-
-        scanner.close();
     }
 
     private static List<String> parseArguments(String input) {
