@@ -135,7 +135,7 @@ public class Main {
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
 
-            // Handle backslash escaping when outside quotes
+            // Handle backslash escaping ONLY when completely outside quotes
             if (c == '\\' && !inSingleQuotes && !inDoubleQuotes) {
                 if (i + 1 < input.length()) {
                     i++; // Advance pointer to consume the escaped character literally
