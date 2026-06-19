@@ -12,7 +12,6 @@ public class Main {
     
     private static int nextJobNumber = 1;
 
-    // Model class to represent active background tasks
     private static class Job {
         int jobNumber;
         long pid;
@@ -27,7 +26,6 @@ public class Main {
         }
     }
 
-    // List to preserve the registry of active tracking jobs
     private static final List<Job> activeJobs = new ArrayList<>();
 
     public static void main(String[] args) throws Exception {
@@ -44,7 +42,6 @@ public class Main {
                 continue;
             }
 
-            // Keep track of the original raw text command for jobs listing mapping
             String rawCommandString = input;
 
             List<String> parsedTokens = parseArguments(input);
@@ -119,10 +116,19 @@ public class Main {
                 }
                 // --- JOBS BUILTIN IMPLEMENTATION ---
                 else if (command.equals("jobs")) {
-                    for (Job job : activeJobs) {
-                        // %-24s pads "Running" with spaces to the right to hit exactly 24 characters total width
+                    int totalJobs = activeJobs.size();
+                    for (int i = 0; i < totalJobs; i++) {
+                        Job job = activeJobs.get(i);
+                        char marker = ' '; // Default to space for older jobs
+                        
+                        if (i == totalJobs - 1) {
+                            marker = '+'; // Most recent job
+                        } else if (i == totalJobs - 2) {
+                            marker = '-'; // Second most recent job
+                        }
+
                         String formattedStatus = String.format("%-24s", job.status);
-                        System.out.println("[" + job.jobNumber + "]+  " + formattedStatus + job.commandString);
+                        System.out.println("[" + job.jobNumber + "]" + marker + "  " + formattedStatus + job.commandString);
                     }
                     System.out.flush();
                 }
@@ -221,7 +227,6 @@ public class Main {
                         System.out.println("[" + nextJobNumber + "] " + process.pid());
                         System.out.flush();
                         
-                        // Register job before incrementing global index counter
                         activeJobs.add(new Job(nextJobNumber, process.pid(), rawCommandString));
                         nextJobNumber++;
                     } else {
